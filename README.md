@@ -1,6 +1,6 @@
 # Selective KV-Cache Replication for Fault-Tolerant LLM Serving
 
-A **terminal-first** software prototype and architecture study of **KV-cache checkpointing and selective replication** for resilient autoregressive LLM inference, built for **advanced computer architecture / systems-oriented ML** coursework (adapted for **Apple Silicon** laptops).
+A prototype and architecture study of **KV-cache checkpointing and selective replication** for resilient autoregressive LLM inference, built for **advanced computer architecture / systems-oriented ML** coursework (adapted for **Apple Silicon** laptops).
 
 This project treats fault-tolerant decoding as more than a modeling exercise. It studies the problem as a **memory-system and control tradeoff**:
 
@@ -344,5 +344,7 @@ This repository is **functionally reproducible**:
 
 Update for your course roster:
 
-- *(Add names here for your submission.)*
+- Yanni Rohan Kommathoti
+- Nikhil Peravali
+- Rajiv Sai Charan Tirumalasetti
 # Fault-tolerant-LLM-Serving-with-KV-Cache-Replication

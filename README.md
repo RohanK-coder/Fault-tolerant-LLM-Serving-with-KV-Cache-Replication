@@ -1,3 +1,4 @@
+# CECS 574 - Topics Distributed Computing
 # Selective KV-Cache Replication for Fault-Tolerant LLM Serving
 
 A prototype and architecture study of **KV-cache checkpointing and selective replication** for resilient autoregressive LLM inference, built for **advanced computer architecture / systems-oriented ML** coursework (adapted for **Apple Silicon** laptops).
@@ -348,3 +349,4 @@ Update for your course roster:
 - Nikhil Peravali
 - Rajiv Sai Charan Tirumalasetti
 # Fault-tolerant-LLM-Serving-with-KV-Cache-Replication
+# CECS 574 - Topics Distributed Computing

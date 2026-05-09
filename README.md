@@ -5,6 +5,7 @@ A software prototype and architecture study of **KV-cache checkpointing and sele
 
 This project studies fault-tolerant LLM decoding as more than a modeling exercise. It treats the problem as a **memory-system, checkpointing, and recovery-control tradeoff**: prompt KV caching, generated-token KV growth, failure simulation, checkpoint restore, correctness validation, and selective replication are modeled as interacting parts of a fault-tolerant inference pipeline.
 
+Results generated are also included in the repo.
 ---
 
 ## Reproduction Note

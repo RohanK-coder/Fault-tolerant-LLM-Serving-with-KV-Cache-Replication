@@ -4,7 +4,7 @@ import time
 from typing import Dict, List, Tuple
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
 DEFAULT_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
@@ -47,6 +47,36 @@ def tensor_nbytes(t: torch.Tensor) -> int:
     return t.numel() * t.element_size()
 
 
+def iter_kv_pairs(past_key_values):
+    if past_key_values is None:
+        return ()
+
+    if hasattr(past_key_values, "to_legacy_cache"):
+        past_key_values = past_key_values.to_legacy_cache()
+
+    if hasattr(past_key_values, "key_cache") and hasattr(past_key_values, "value_cache"):
+        return tuple(zip(past_key_values.key_cache, past_key_values.value_cache))
+
+    pairs = []
+    for layer in past_key_values:
+        if isinstance(layer, (tuple, list)) and len(layer) >= 2:
+            pairs.append((layer[0], layer[1]))
+        else:
+            raise TypeError(f"Unsupported past_key_values layer format: {type(layer)}")
+    return tuple(pairs)
+
+
+def ensure_model_cache(past_key_values, model):
+    if past_key_values is None:
+        return None
+
+    if hasattr(past_key_values, "get_seq_length"):
+        return past_key_values
+
+    kv_pairs = iter_kv_pairs(past_key_values)
+    return DynamicCache(ddp_cache_data=kv_pairs, config=model.config)
+
+
 def save_json(obj: Dict, path: str) -> None:
     ensure_dir(os.path.dirname(path))
     with open(path, "w", encoding="utf-8") as f:
@@ -56,9 +86,9 @@ def save_json(obj: Dict, path: str) -> None:
 def summarize_past_key_values(past_key_values) -> Tuple[List[Dict], int]:
     layers = []
     total_kv_bytes = 0
-    for layer_idx, layer_kv in enumerate(past_key_values):
-        key = layer_kv[0].detach().to("cpu")
-        value = layer_kv[1].detach().to("cpu")
+    for layer_idx, (key, value) in enumerate(iter_kv_pairs(past_key_values)):
+        key = key.detach().to("cpu")
+        value = value.detach().to("cpu")
         key_bytes = tensor_nbytes(key)
         value_bytes = tensor_nbytes(value)
         total_kv_bytes += key_bytes + value_bytes

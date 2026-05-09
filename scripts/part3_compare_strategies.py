@@ -6,20 +6,20 @@ import time
 
 import torch
 
-from common import DEFAULT_MODEL, choose_device, format_prompt, load_model, load_tokenizer, move_batch
+from common import DEFAULT_MODEL, choose_device, ensure_model_cache, format_prompt, iter_kv_pairs, load_model, load_tokenizer, move_batch
 
 
 def cpu_clone_past(past_key_values):
-    return tuple((k.detach().to("cpu").clone(), v.detach().to("cpu").clone()) for k, v in past_key_values)
+    return tuple((k.detach().to("cpu").clone(), v.detach().to("cpu").clone()) for k, v in iter_kv_pairs(past_key_values))
 
 
 def move_past_to_device(past_key_values, device: str):
-    return tuple((k.to(device), v.to(device)) for k, v in past_key_values)
+    return tuple((k.to(device), v.to(device)) for k, v in iter_kv_pairs(past_key_values))
 
 
 def pkv_nbytes(past_key_values) -> int:
     total = 0
-    for k, v in past_key_values:
+    for k, v in iter_kv_pairs(past_key_values):
         total += k.numel() * k.element_size() + v.numel() * v.element_size()
     return total
 
@@ -67,6 +67,7 @@ def stepwise_generate(model, input_ids, attention_mask, total_new_tokens):
 def continue_from_pkv(model, generated_prefix, attention_mask, pkv, more_tokens):
     generated = generated_prefix.clone()
     attn = attention_mask.clone()
+    current_pkv = ensure_model_cache(pkv, model)
 
     for _ in range(more_tokens):
         last_id = generated[:, -1:]
@@ -74,7 +75,7 @@ def continue_from_pkv(model, generated_prefix, attention_mask, pkv, more_tokens)
             out = model(
                 input_ids=last_id,
                 attention_mask=attn,
-                past_key_values=pkv,
+                past_key_values=current_pkv,
                 use_cache=True,
                 return_dict=True,
             )
@@ -84,13 +85,13 @@ def continue_from_pkv(model, generated_prefix, attention_mask, pkv, more_tokens)
             [attn, torch.ones((attn.shape[0], 1), dtype=attn.dtype, device=attn.device)],
             dim=1,
         )
-        pkv = out.past_key_values
+        current_pkv = out.past_key_values
 
     return generated
 
 
 def replay_suffix_into_cache(model, base_generated, base_attn, base_pkv, replay_tokens):
-    pkv = base_pkv
+    pkv = ensure_model_cache(base_pkv, model)
     attn = base_attn.clone()
 
     for i in range(replay_tokens.shape[1]):

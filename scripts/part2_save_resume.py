@@ -8,6 +8,8 @@ import torch
 from common import (
     DEFAULT_MODEL,
     choose_device,
+    ensure_model_cache,
+    iter_kv_pairs,
     format_prompt,
     load_model,
     load_tokenizer,
@@ -17,11 +19,11 @@ from common import (
 
 
 def cpu_clone_past(past_key_values):
-    return tuple((k.detach().to("cpu").clone(), v.detach().to("cpu").clone()) for k, v in past_key_values)
+    return tuple((k.detach().to("cpu").clone(), v.detach().to("cpu").clone()) for k, v in iter_kv_pairs(past_key_values))
 
 
 def move_past_to_device(past_key_values, device: str):
-    return tuple((k.to(device), v.to(device)) for k, v in past_key_values)
+    return tuple((k.to(device), v.to(device)) for k, v in iter_kv_pairs(past_key_values))
 
 
 def greedy_generate_from_state(model, generated, attn, pkv, logits, num_steps):
@@ -32,7 +34,7 @@ def greedy_generate_from_state(model, generated, attn, pkv, logits, num_steps):
     """
     current_generated = generated.clone()
     current_attn = attn.clone()
-    current_pkv = pkv
+    current_pkv = ensure_model_cache(pkv, model)
     current_logits = logits
 
     for _ in range(num_steps):

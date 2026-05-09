@@ -1,40 +1,122 @@
-# CECS 574 - Topics Distributed Computing
+#CECS 574 - Topics Distributed Computing - TEAM DND
 # Selective KV-Cache Replication for Fault-Tolerant LLM Serving
 
-A prototype and architecture study of **KV-cache checkpointing and selective replication** for resilient autoregressive LLM inference, built for **advanced computer architecture / systems-oriented ML** coursework (adapted for **Apple Silicon** laptops).
+A software prototype and architecture study of **KV-cache checkpointing and selective replication** for resilient autoregressive LLM inference, built for **CECS 574 - Topics Distributed Computing**.
 
-This project treats fault-tolerant decoding as more than a modeling exercise. It studies the problem as a **memory-system and control tradeoff**:
+This project studies fault-tolerant LLM decoding as more than a modeling exercise. It treats the problem as a **memory-system, checkpointing, and recovery-control tradeoff**: prompt KV caching, generated-token KV growth, failure simulation, checkpoint restore, correctness validation, and selective replication are modeled as interacting parts of a fault-tolerant inference pipeline.
 
-- How does the **KV cache** grow with prompt and generated length, and how can we **measure** it layer by layer?
-- After a simulated failure mid-generation, how do we **resume** from a saved prompt KV state without silently drifting from a full reroll baseline?
-- How do **recovery strategies** compare—**no replication**, **full snapshot replication**, **selective (prefix + recent-window) replication**, and a **periodic** checkpoint baseline?
-- What do **recovery time**, **replicated KV volume (MB)**, **runtime overhead of restore**, and **correctness (token match)** imply for real serving stacks?
+---
+
+## Reproduction Note
+
+This repository uses a **single main workflow**. There are no separate Git branches for reduced or full experiments.
+
+The project is organized into four local execution parts:
+
+1. **Part 1 — KV inspection**
+2. **Part 2 — Prompt checkpoint + resume**
+3. **Part 3 — Recovery strategy comparison**
+4. **Part 4 — Plot generation**
+
+Generated CSV, JSON, and PNG outputs are written under `results/`. The `results/` directory may be ignored by Git, so outputs can be regenerated locally by rerunning the provided shell scripts.
+
+For quick verification, run Parts 1–4 in order.
+
+---
+
+## Quick Start
+
+Use this path first when checking the project locally.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+./run_part1_tinyllama.sh
+./run_part2_resume.sh
+./run_part3_compare.sh
+./run_part4_plot.sh
+```
+
+On Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+python scripts\part1_kv_inspect_tinyllama.py
+python scripts\part2_save_resume.py
+python scripts\part3_compare_strategies.py
+python scripts\part4_plot_results.py
+```
 
 ---
 
 ## 1. Project Summary
 
-In baseline greedy decoding, the model maintains **past key–values (KV)** for all prior tokens. After a failure, a naïve recovery may **recompute from the prompt**, which is correct but expensive. Alternatively, the system can **replicate** portions of the KV state at runtime so recovery can **continue from a checkpoint** with less rework.
+In baseline autoregressive decoding, a causal language model generates one token at a time. To avoid recomputing attention over all previous tokens, the model stores **past key-values**, commonly called the **KV cache**.
 
-This repository implements and compares several strategies on a **single target model** (`TinyLlama/TinyLlama-1.1B-Chat-v1.0`): there is no separate draft model; the emphasis is on **what to replicate**, **when**, and **how much memory** that costs versus **recovery latency**.
+During long generation, the KV cache grows with:
 
-The workflow is organized into **four parts** you run locally in order (shell wrappers + Python scripts), not on a fixed weekly schedule.
+- prompt length,
+- generated length,
+- number of transformer layers,
+- number of attention heads / KV heads,
+- hidden dimension,
+- and tensor dtype.
+
+If an inference worker fails mid-generation, a naive recovery strategy may recompute from the original prompt. That is correct, but expensive. A fault-tolerant serving system can instead replicate selected KV-cache states so recovery can resume from a checkpoint with less rework.
+
+This repository studies KV-cache recovery from three perspectives:
+
+- **Correctness** — recovered generation should exactly match a full baseline greedy decoding run.
+- **Memory-system cost** — replicated KV state consumes memory and transfer bandwidth.
+- **Recovery tradeoff** — different checkpointing strategies reduce recovery latency at different replication costs.
+
+Key architecture questions explored in this project include:
+
+- How does the KV cache grow across layers during autoregressive generation?
+- How much KV state must be replicated to recover efficiently?
+- Can selective replication reduce recovery cost without the full memory overhead of complete snapshot replication?
+- How do recovery time, replicated KV volume, restore overhead, and token correctness compare across strategies?
 
 ---
 
 ## 2. Main Contributions
 
-- **Part 1 — KV inspection:** layer-wise KV shapes, dtypes, and total KV memory for a short greedy generation; JSON summary for reports.
-- **Part 2 — Prompt checkpoint + resume:** save CPU-cloned prompt `past_key_values` (and associated logits), simulate generate-then-fail-then-recover, and verify **exact token match** against a full baseline run.
-- **Part 3 — Strategy comparison:** CSV metrics for `none`, `full`, selective prefix + recent window, and periodic-K checkpoint strategies (`recovery_time_sec`, `replicated_kv_mb`, `runtime_overhead_sec`, `matches_baseline`).
-- **Part 4 — Plotting:** bar and scatter plots from the Part 3 comparison CSV (recovery time, replication cost, cost–recovery tradeoff).
-- **Optional multi-trial pipeline:** repeat Part 3 many times, aggregate means/stds, and plot summary figures.
+This project includes:
+
+- a **KV-cache inspection tool** for TinyLlama,
+- layer-wise reporting of KV tensor shapes, dtypes, and memory size,
+- prompt KV checkpointing using CPU-cloned `past_key_values`,
+- a generate-then-fail-then-recover simulation,
+- exact token-match validation against a full greedy decoding baseline,
+- multiple recovery strategies:
+  - no replication,
+  - full snapshot replication,
+  - selective prefix + recent-window replication,
+  - periodic checkpoint replication,
+- CSV metrics for recovery experiments,
+- plot scripts for report and presentation figures,
+- optional multi-trial execution and aggregation,
+- an Apple Silicon-friendly execution path using PyTorch MPS when available.
+
+The main metrics studied are:
+
+- `recovery_time_sec`,
+- `replicated_kv_mb`,
+- `runtime_overhead_sec`,
+- `matches_baseline`.
 
 ---
 
 ## 3. Repository Layout
 
-> Paths below match this repository. If you rename directories locally, adjust commands accordingly.
+The root-level project structure is:
 
 ```text
 tinyllama_kv_project/
@@ -47,15 +129,16 @@ tinyllama_kv_project/
 │   ├── run_part3_trials.py
 │   ├── aggregate_part3_trials.py
 │   └── plot_part3_summary.py
-├── results/                 # generated; see .gitignore
+├── results/
 │   ├── part1_tinyllama.json
 │   ├── part2_resume/
 │   ├── part3_strategy_comparison.csv
 │   ├── plots/
-│   └── ...
+│   └── plots_summary/
 ├── logs/
 ├── requirements.txt
 ├── .gitignore
+├── README.md
 ├── run_part1_tinyllama.sh
 ├── run_part2_resume.sh
 ├── run_part3_compare.sh
@@ -63,30 +146,67 @@ tinyllama_kv_project/
 └── run_part3_trials_and_summary.sh
 ```
 
-### Important files
+> Note: A local `.venv/` directory may exist on the developer machine, but it should be recreated locally by each user and should not be committed.
 
-| File | Role |
-|------|------|
-| `scripts/common.py` | Device selection (MPS vs CPU), model/tokenizer load, prompt formatting, JSON helpers. |
-| `scripts/part1_kv_inspect_tinyllama.py` | Inspect KV structure and memory; write `results/part1_tinyllama.json` (default). |
-| `scripts/part2_save_resume.py` | Save prompt KV, benchmark recovery path, write summary under `results/part2_resume/` (default). |
-| `scripts/part3_compare_strategies.py` | Run strategy comparison; write CSV (default `results/part3_strategy_comparison.csv`). |
-| `scripts/part4_plot_results.py` | Read comparison CSV; write PNGs under `results/plots/` (default). |
-| `scripts/run_part3_trials.py` | Subprocess driver: many trials → `results/part3_trials.csv`. |
-| `scripts/aggregate_part3_trials.py` | Aggregate trials → `results/part3_summary.csv`. |
-| `scripts/plot_part3_summary.py` | Plot aggregated metrics → `results/plots_summary/`. |
+### Important files and directories
+
+- `scripts/common.py`  
+  Shared helpers for device selection, model/tokenizer loading, prompt formatting, and JSON output.
+
+- `scripts/part1_kv_inspect_tinyllama.py`  
+  Runs a short greedy generation and records KV-cache structure, tensor shapes, dtype information, and total memory usage.
+
+- `scripts/part2_save_resume.py`  
+  Saves prompt KV state, simulates failure during generation, restores from checkpoint, and verifies recovered tokens against a baseline run.
+
+- `scripts/part3_compare_strategies.py`  
+  Compares recovery strategies and writes metrics to `results/part3_strategy_comparison.csv`.
+
+- `scripts/part4_plot_results.py`  
+  Reads the Part 3 CSV and generates plots under `results/plots/`.
+
+- `scripts/run_part3_trials.py`  
+  Runs Part 3 repeatedly and writes multi-trial results.
+
+- `scripts/aggregate_part3_trials.py`  
+  Aggregates trial results into summary statistics.
+
+- `scripts/plot_part3_summary.py`  
+  Generates plots from aggregated multi-trial results.
+
+- `results/`  
+  Generated experiment artifacts such as CSV, JSON, and PNG files.
+
+- `logs/`  
+  Optional runtime logs.
 
 ---
 
 ## 4. Supported Model
 
-The project is configured around **one** causal LM (easy on laptops, still structurally representative):
+The project is configured around one causal language model:
 
 ```text
-DEFAULT_MODEL = TinyLlama/TinyLlama-1.1B-Chat-v1.0
+TinyLlama/TinyLlama-1.1B-Chat-v1.0
 ```
 
-You can override `--model` on each script if you swap in another Hugging Face causal LM, but **layer counts, KV layout, and memory** will change; re-validate correctness on Part 2 before trusting Part 3 comparisons.
+The default model is defined as:
+
+```python
+DEFAULT_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+```
+
+TinyLlama is used because it is small enough for local experimentation while still exposing a realistic transformer KV-cache structure.
+
+You can override the model with `--model` on supported scripts, but changing the model changes:
+
+- number of layers,
+- KV tensor layout,
+- KV memory size,
+- runtime behavior,
+- and recovery performance.
+
+If you use another Hugging Face causal LM, rerun Part 2 and verify exact token-match correctness before trusting Part 3 comparisons.
 
 ---
 
@@ -94,13 +214,25 @@ You can override `--model` on each script if you swap in another Hugging Face ca
 
 ### Recommended Python version
 
-Use **Python 3.9–3.12** for broad `torch` / `transformers` compatibility. Newer Python versions may work but are not guaranteed against every wheel.
+Use **Python 3.9-3.12**.
 
-### Create environment
+Newer Python versions may work, but package compatibility for `torch`, `transformers`, and Apple Silicon MPS support may vary.
+
+### Create and activate a virtual environment
+
+Create a local virtual environment so dependencies are isolated from system-level Python packages:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+On Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 ```
 
@@ -110,19 +242,55 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Core packages (see `requirements.txt`): `torch`, `transformers`, `accelerate`, `sentencepiece`, `matplotlib`, `pandas`.
+Core packages include:
 
-### Notes
+- `torch`,
+- `transformers`,
+- `accelerate`,
+- `sentencepiece`,
+- `matplotlib`,
+- `pandas`.
 
-- First run will **download** the TinyLlama weights from Hugging Face (network + disk).
-- On **Apple Silicon**, `scripts/common.py` uses **MPS** when available; otherwise **CPU**.
-- Hugging Face cache defaults to your user cache; a local `.cache/` directory may appear and is listed in `.gitignore`.
+### Verify the environment
+
+```bash
+python -c "import torch, transformers, matplotlib, pandas; print('env ok', torch.backends.mps.is_available())"
+```
+
+### Environment notes
+
+- Run all commands from the project root.
+- Activate `.venv` before running scripts.
+- The first run downloads TinyLlama weights from Hugging Face.
+- On Apple Silicon, the code uses **MPS** when available.
+- If MPS is unavailable, the code falls back to CPU.
+- A local Hugging Face cache may be created automatically.
+- The `results/` directory contains generated artifacts and can be regenerated.
 
 ---
 
-## 6. Running the Project
+## 6. Reproducibility Guide
 
-### Part 1 — KV inspection
+This section gives a complete workflow for inspecting KV cache behavior, validating recovery correctness, comparing strategies, and regenerating plots.
+
+The repository is designed to be **functionally reproducible**. The same scripts and flags should reproduce the same workflow, though absolute wall-clock times may vary by machine, load, device, and package versions.
+
+### Step 1 — Activate the virtual environment
+
+```bash
+source .venv/bin/activate
+```
+
+If the virtual environment does not exist yet:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### Step 2 — Run KV-cache inspection
 
 ```bash
 ./run_part1_tinyllama.sh
@@ -131,66 +299,179 @@ Core packages (see `requirements.txt`): `torch`, `transformers`, `accelerate`, `
 Or directly:
 
 ```bash
-python scripts/part1_kv_inspect_tinyllama.py --help
+python scripts/part1_kv_inspect_tinyllama.py
 ```
 
-### Part 2 — Save / resume from prompt KV
+Default output:
+
+```text
+results/part1_tinyllama.json
+```
+
+This step records layer-wise KV-cache information and total KV memory usage.
+
+### Step 3 — Run prompt checkpoint and resume validation
 
 ```bash
 ./run_part2_resume.sh
 ```
 
-### Part 3 — Single comparison (writes CSV)
+Or directly:
+
+```bash
+python scripts/part2_save_resume.py
+```
+
+Default output directory:
+
+```text
+results/part2_resume/
+```
+
+This step verifies whether recovered generation exactly matches the full baseline greedy decoding path.
+
+### Step 4 — Run recovery strategy comparison
 
 ```bash
 ./run_part3_compare.sh
 ```
 
-### Part 4 — Plots from Part 3 CSV
+Or directly:
+
+```bash
+python scripts/part3_compare_strategies.py
+```
+
+Default output:
+
+```text
+results/part3_strategy_comparison.csv
+```
+
+This step compares:
+
+- no replication,
+- full replication,
+- selective prefix + recent-window replication,
+- periodic checkpointing.
+
+### Step 5 — Generate plots
 
 ```bash
 ./run_part4_plot.sh
 ```
 
-Requires Part 3 output (default path: `results/part3_strategy_comparison.csv`).
+Or directly:
 
-### Optional — Multi-trial Part 3 + aggregation + plots
+```bash
+python scripts/part4_plot_results.py
+```
+
+Default plot outputs:
+
+```text
+results/plots/recovery_time_by_strategy.png
+results/plots/replicated_kv_by_strategy.png
+results/plots/cost_vs_recovery_tradeoff.png
+```
+
+### Step 6 — Optional multi-trial workflow
+
+For repeated trials, aggregation, and summary plots:
 
 ```bash
 ./run_part3_trials_and_summary.sh
 ```
 
-This runs multiple trials, aggregates by strategy, and writes figures under `results/plots_summary/`.
+Typical outputs:
+
+```text
+results/part3_trials.csv
+results/part3_summary.csv
+results/plots_summary/
+```
 
 ---
 
-## 7. Reproducibility Guide
+## 7. Included / Expected Outputs and Plot Set
 
-### Step 1 — Verify the environment
+The generated CSV / JSON outputs include fields such as:
 
-```bash
-python -c "import torch, transformers, matplotlib, pandas; print('env ok', torch.backends.mps.is_available())"
+- strategy name,
+- generation token count,
+- failure token position,
+- recent-window size,
+- recovery time,
+- replicated KV size in MB,
+- restore/runtime overhead,
+- baseline token sequence,
+- recovered token sequence,
+- exact token-match result.
+
+### Main output files
+
+```text
+results/part1_tinyllama.json
+results/part2_resume/
+results/part3_strategy_comparison.csv
+results/part3_trials.csv
+results/part3_summary.csv
 ```
 
-### Step 2 — Run parts in order
+### Recommended / generated plot set
 
-1. Part 1 → JSON KV report  
-2. Part 2 → checkpoint + resume summary  
-3. Part 3 → strategy comparison CSV  
-4. Part 4 → plots from that CSV  
+1. **Recovery time by strategy**  
+   Shows which strategy recovers fastest after a simulated failure.
 
-### Step 3 — Validate correctness (Part 2 / Part 3)
+2. **Replicated KV by strategy**  
+   Shows memory cost of each replication policy.
 
-- Part 2 prints whether recovered tokens **exactly match** the baseline path.
-- Part 3 CSV includes `matches_baseline` per strategy; selective and periodic paths should match when the implementation assumptions hold.
+3. **Cost vs recovery tradeoff**  
+   Shows the relationship between replicated KV size and recovery latency.
 
-### Step 4 — Sweeps (manual)
+4. **Multi-trial summary plots**  
+   Shows mean and variation across repeated Part 3 runs.
 
-`part3_compare_strategies.py` accepts at least:
+---
 
-- `--generation-tokens`, `--failure-token`, `--recent-window`, `--prompt`, `--csv-out`
+## 8. Suggested Commands
 
-Example:
+### KV inspection
+
+```bash
+source .venv/bin/activate
+./run_part1_tinyllama.sh
+```
+
+### Prompt checkpoint + resume
+
+```bash
+source .venv/bin/activate
+./run_part2_resume.sh
+```
+
+### Strategy comparison
+
+```bash
+source .venv/bin/activate
+./run_part3_compare.sh
+```
+
+### Plot generation
+
+```bash
+source .venv/bin/activate
+./run_part4_plot.sh
+```
+
+### Multi-trial experiment
+
+```bash
+source .venv/bin/activate
+./run_part3_trials_and_summary.sh
+```
+
+### Manual Part 3 sweep example
 
 ```bash
 python scripts/part3_compare_strategies.py \
@@ -200,153 +481,217 @@ python scripts/part3_compare_strategies.py \
   --csv-out results/part3_strategy_comparison.csv
 ```
 
-For repeated runs, use `run_part3_trials.py` and then aggregation/plot scripts.
+---
 
-### Step 5 — Artifacts directory
+## 9. Expected Findings
 
-By default, artifacts go under `results/` (ignored by git in this repo—regenerate after clone). Keep CSVs and plots together for reports:
+Across the project, the main expected conclusions are:
 
-- `results/part3_strategy_comparison.csv`
-- `results/plots/*.png`
-- `results/plots_summary/*.png` (multi-trial path)
+- **No replication** has the lowest replication cost but higher recovery latency because more work must be recomputed.
+- **Full replication** reduces recovery latency but has the highest replicated KV memory cost.
+- **Selective replication** attempts to preserve the most useful KV state while avoiding full snapshot cost.
+- **Periodic checkpointing** provides a structured baseline where recovery cost depends on checkpoint interval and failure position.
+- Correct recovery requires exact KV/logit state handling; otherwise, resumed generation can silently drift from the baseline.
+
+In one sentence:
+
+> Selective prompt KV replication can reduce recovery cost compared with no replication while avoiding the highest runtime and memory overhead of replicating the entire generated KV state.
 
 ---
 
-## 8. Important Note for Reproducibility
+## 10. Results Summary
 
-- The **code path is reproducible**: same flags and hardware class should yield consistent **trends**; absolute wall-clock times vary by machine and load.
-- **Git clones** that respect `.gitignore` will **not** include `results/`; rerun the shell scripts to regenerate figures and tables.
-- For strict apples-to-apples numbers for a paper, **record** `torch`/`transformers` versions, device (`mps` vs `cpu`), and fixed seeds if you extend the code with sampling.
+Representative results should be generated locally by running Part 3.
 
----
+A typical comparison table has the following structure:
 
-## 9. How to Generate the Plots
+| Strategy | Recovery Time (sec) | Replicated KV (MB) | Runtime Overhead (sec) | Matches Baseline |
+|---|---:|---:|---:|---|
+| none | generated locally | generated locally | generated locally | true / false |
+| full | generated locally | generated locally | generated locally | true / false |
+| selective | generated locally | generated locally | generated locally | true / false |
+| periodic | generated locally | generated locally | generated locally | true / false |
 
-### Option A — From a single Part 3 run
-
-1. Run `./run_part3_compare.sh` (or `part3_compare_strategies.py` with your flags).  
-2. Run `./run_part4_plot.sh`.
-
-Outputs (defaults):
+Use this CSV as the source of truth:
 
 ```text
-results/plots/recovery_time_by_strategy.png
-results/plots/replicated_kv_by_strategy.png
-results/plots/cost_vs_recovery_tradeoff.png
+results/part3_strategy_comparison.csv
 ```
 
-### Option B — From multi-trial data
+For multi-trial summaries, use:
 
-1. `./run_part3_trials_and_summary.sh`  
-2. Inspect `results/part3_summary.csv` and `results/plots_summary/*.png`.
-
----
-
-## 10. Recommended Plot / Metric Set
-
-Useful for slides and reports:
-
-1. **Recovery time by strategy** — primary latency comparison.  
-2. **Replicated KV (MB) by strategy** — memory/replication cost.  
-3. **Scatter: replicated KV vs recovery time** — cost–latency tradeoff.  
-4. **Multi-trial means** (optional) — stability across prompts/trials via `part3_summary.csv`.
+```text
+results/part3_summary.csv
+```
 
 ---
 
-## 11. Suggested Reproduction Commands
+## 11. Limitations
 
-**Minimal end-to-end (after `pip install` and venv activate):**
+- The project uses a **single target model** rather than a full production model fleet.
+- The provided scripts use **greedy decoding** only.
+- Failures are **simulated** at controlled token positions.
+- The system does not implement a real distributed crash, scheduler failure, or GPU worker restart.
+- TinyLlama is suitable for laptops, but absolute KV-cache sizes differ from 7B, 13B, or 70B models.
+- Apple Silicon MPS behavior differs from CUDA server behavior.
+- Wall-clock timings vary across hardware, package versions, system load, and device backend.
+- Selective checkpointing policies are prototype policies, not production serving policies.
+
+---
+
+## 12. Troubleshooting
+
+### `ModuleNotFoundError`
+
+Make sure you are running commands from the project root and that the virtual environment is activated.
 
 ```bash
-./run_part1_tinyllama.sh
-./run_part2_resume.sh
+source .venv/bin/activate
+python scripts/part1_kv_inspect_tinyllama.py
+```
+
+### `python3: command not found`
+
+Check the Python version installed on your system:
+
+```bash
+python --version
+python3 --version
+```
+
+Then create the virtual environment using the available command:
+
+```bash
+python -m venv .venv
+```
+
+or:
+
+```bash
+python3 -m venv .venv
+```
+
+### `.venv/bin/activate: no such file or directory`
+
+The virtual environment has not been created yet.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### Hugging Face model download issues
+
+The first run downloads TinyLlama from Hugging Face. Make sure you have network access and enough disk space.
+
+If the model cache becomes corrupted, remove the local cache entry and rerun the script.
+
+### MPS is unavailable
+
+If this check prints `False`:
+
+```bash
+python -c "import torch; print(torch.backends.mps.is_available())"
+```
+
+the scripts should fall back to CPU. CPU runs are slower but still useful for correctness testing.
+
+### Plot script cannot find CSV files
+
+Run Part 3 before Part 4:
+
+```bash
 ./run_part3_compare.sh
 ./run_part4_plot.sh
 ```
 
-**Heavier multi-trial pipeline:**
+Also confirm that the CSV exists:
 
 ```bash
-./run_part3_trials_and_summary.sh
+ls results/part3_strategy_comparison.csv
 ```
 
 ---
 
-## 12. Expected Findings
+## 13. Reproducibility Statement
 
-Typical patterns (your exact numbers depend on hardware and hyperparameters):
+This repository is designed to be **functionally reproducible**:
 
-- **No replication** (`none`): higher recovery time (recompute-heavy) but **no** replicated KV at failure time in the measured sense used for that row.  
-- **Full replication** (`full`): lower recovery time after failure but **larger** replicated KV and snapshot overhead.  
-- **Selective** strategies: attempt to sit **between** those extremes—lower replication bulk than full snapshot for comparable recovery behavior when assumptions match.  
-- **Periodic** baselines: useful comparison when checkpoints are evenly spaced.
+- KV-cache inspection can be rerun,
+- checkpoint and resume behavior can be revalidated,
+- recovery strategies can be compared from the same scripts,
+- CSV outputs can be regenerated,
+- plots can be rebuilt from CSV data,
+- and multi-trial summaries can be reproduced locally.
 
-One sentence you can defend in a report:
+For strict apples-to-apples reporting, record:
 
-> **Selective prompt KV replication** can reduce recovery cost versus **no replication**, while avoiding the **highest** runtime/memory overhead of **replicating the entire generated KV state**.
-
----
-
-## 13. Limitations
-
-- **Single-model** study: no draft/target speculative pair; focus is KV recovery, not speculative decoding.  
-- **Greedy** decoding only in the provided scripts; sampling would need extension.  
-- **Simulated** failure point via stepwise generation snapshots—not a distributed crash or kernel failure.  
-- **TinyLlama** fits laptops; absolute KV sizes differ on 7B/70B-class models, though **relative** tradeoffs often track qualitatively.  
-- **MPS vs CPU** performance characteristics differ from CUDA servers.
+- Python version,
+- `torch` version,
+- `transformers` version,
+- device backend (`mps` or `cpu`),
+- model name,
+- generation token count,
+- failure token position,
+- recent-window size,
+- and prompt text.
 
 ---
 
 ## 14. Future Work
 
-- Multi-GPU / vLLM-style serving integration and real request-level failures.  
-- Quantized KV (FP8/INT8) and its effect on replication cost.  
-- Async replication and bounded staleness policies.  
-- Larger models and families with gated checkpoints.  
-- Energy measurement tied to KV movement, not only wall-clock.
+Possible extensions include:
+
+- real distributed serving integration,
+- vLLM-style KV-page checkpointing,
+- async KV replication,
+- bounded-staleness checkpoint policies,
+- quantized KV replication using FP8 or INT8,
+- larger model experiments,
+- CUDA server benchmarking,
+- energy measurement tied to KV movement,
+- request-level failure injection,
+- and integration with production inference runtimes.
 
 ---
 
 ## 15. References / Starting Points
 
-Useful background (not exhaustive):
+Useful public systems and background topics related to this project include:
 
-- Hugging Face **Transformers** (`past_key_values`, `use_cache`, generation).  
-- **vLLM** / **PagedAttention** (production KV memory layout).  
-- **llama.cpp** and other runtimes (KV cache in edge deployment).  
-- PyTorch **MPS** documentation for Apple Silicon.
+- Hugging Face Transformers documentation for `past_key_values`, `use_cache`, and generation.
+- PyTorch MPS documentation for Apple Silicon execution.
+- vLLM and PagedAttention for production KV-cache memory management.
+- llama.cpp and other local inference runtimes for edge deployment.
+- Transformer attention and KV-cache design in autoregressive decoding systems.
 
----
+These references are useful for understanding:
 
-## 16. Quick Start
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-./run_part1_tinyllama.sh
-```
-
-Then run Parts 2–4 in order (or jump to Part 3–4 if you only need strategy plots and regenerate CSVs first).
+- autoregressive decoding,
+- KV-cache growth,
+- memory movement,
+- checkpointing,
+- restore overhead,
+- inference serving failures,
+- and fault-tolerant LLM runtime design.
 
 ---
 
-## 17. Reproducibility Statement
+## 16. Authors
 
-This repository is **functionally reproducible**:
+- Yanni Rohan Kommathoti  
+  `YanniRohan.Kommathoti01@student.csulb.edu`
 
-- Each part can be rerun from a clean `results/` directory.  
-- CSV and PNG outputs are **derived artifacts**; this repo’s `.gitignore` excludes `results/` so clones stay small—**regenerate** outputs after clone for identical figures to your machine’s run.
+- Nikhil Peravali  
+  `Nikhil.Peravali01@student.csulb.edu`
+
+- Rajiv Sai Charan Tirumalasetti  
+  `RajivSaiCharan.Tirumalasetti01@student.csulb.edu`
 
 ---
 
-## 18. Authors
+## Course
 
-Update for your course roster:
+**CECS 574 - Topics Distributed Computing**
 
-- Yanni Rohan Kommathoti
-- Nikhil Peravali
-- Rajiv Sai Charan Tirumalasetti
-# Fault-tolerant-LLM-Serving-with-KV-Cache-Replication
-# CECS 574 - Topics Distributed Computing
+California State University, Long Beach

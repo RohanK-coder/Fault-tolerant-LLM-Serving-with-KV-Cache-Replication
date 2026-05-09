@@ -1,0 +1,5 @@
+strategy,runtime_overhead_sec,replicated_kv_mb,recovery_time_sec,matches_baseline
+none,0.0,0.0,0.9028,True
+full,0.0081,1.2461,0.3251,True
+selective_prefix_plus_recent6,0.0079,1.1172,0.4496,True
+periodic_k6,0.0084,1.1172,0.4479,True

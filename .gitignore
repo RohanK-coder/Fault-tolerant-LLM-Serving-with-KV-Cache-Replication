@@ -26,8 +26,7 @@ wheels/
 *.egg
 
 # Reproducible / generated project outputs (re-run scripts to recreate)
-results/
-logs/
+
 
 # Local caches (e.g. Hugging Face under .cache/huggingface; models load on first run)
 .cache/

@@ -1,0 +1,15 @@
+{
+  "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "device": "mps",
+  "load_time_sec": 9.905,
+  "prompt": "Explain how saving prompt KV can speed up recovery after a failure.",
+  "tokens_before_checkpoint": 8,
+  "tokens_after_checkpoint": 16,
+  "baseline_time_sec": 0.6239,
+  "before_failure_time_sec": 0.3023,
+  "recovery_time_sec": 0.6051,
+  "exact_token_match": true,
+  "checkpoint_path": "results/part2_resume/prompt_kv.pt",
+  "baseline_text": "<|system|>You are a helpful assistant.<|user|>Explain how saving prompt KV can speed up recovery after a failure.<|assistant|>Sure! Saving prompt KV (Key Value) is a feature in Kubernetes that allows you to store key",
+  "recovered_text": "<|system|>You are a helpful assistant.<|user|>Explain how saving prompt KV can speed up recovery after a failure.<|assistant|>Sure! Saving prompt KV (Key Value) is a feature in Kubernetes that allows you to store key"
+}

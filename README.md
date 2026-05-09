@@ -185,7 +185,7 @@ tinyllama_kv_project/
 
 ## 4. Supported Model
 
-The project is configured around one causal language model:
+The project is configured around this language model:
 
 ```text
 TinyLlama/TinyLlama-1.1B-Chat-v1.0
@@ -197,7 +197,6 @@ The default model is defined as:
 DEFAULT_MODEL = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 ```
 
-TinyLlama is used because it is small enough for local experimentation while still exposing a realistic transformer KV-cache structure.
 
 You can override the model with `--model` on supported scripts, but changing the model changes:
 

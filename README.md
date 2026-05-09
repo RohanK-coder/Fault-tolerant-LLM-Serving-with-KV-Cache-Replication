@@ -507,10 +507,10 @@ A typical comparison table has the following structure:
 
 | Strategy | Recovery Time (sec) | Replicated KV (MB) | Runtime Overhead (sec) | Matches Baseline |
 |---|---:|---:|---:|---|
-| none | generated locally | generated locally | generated locally | true / false |
-| full | generated locally | generated locally | generated locally | true / false |
-| selective | generated locally | generated locally | generated locally | true / false |
-| periodic | generated locally | generated locally | generated locally | true / false |
+| none | 0.9028 | 0.0000 | 0.0000 | True |
+| full | 0.3251 | 1.2461 | 0.0081 | True |
+| selective prefix + recent 6 | 0.4496 | 1.1172 | 0.0079 | True |
+| periodic k=6 | 0.4479 | 1.1172 | 0.0084 | True |
 
 Use this CSV as the source of truth:
 
